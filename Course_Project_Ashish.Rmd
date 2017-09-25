@@ -1,0 +1,204 @@
+---
+title: "Course Project - Ashish Baid"
+author: "Ashish Baid"
+date: "9/19/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Practical Machine Learning - Course Project
+
+## Loading Packages
+```{r Loading Packages,cache=TRUE}
+library(caret)
+library(gridExtra)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(RCurl)
+library(modelr)
+library(purrr)
+library("nnet")
+library(randomForest)
+```
+
+## Loading the dataset
+
+```{r Loading the dataset,cache=TRUE, cache=TRUE}
+myfile<-getURL('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv',ssl.verifyhost=F,ssl.verifypeer=F)
+training<-read.csv(textConnection(myfile),stringsAsFactors = F,header=T)
+
+myfile_t<-getURL('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv',ssl.verifyhost=F,ssl.verifypeer=F)
+testing<-read.csv(textConnection(myfile_t),stringsAsFactors = F,header=T)
+
+
+```
+
+## Feature Engineering and Formatting the dataset
+```{r Feature engineering and formatting,echo = TRUE,cache=TRUE}
+trainingaccel<-grepl("^accel",names(training))
+trainingtotal<-grepl("^total",names(training))
+roll<-grepl("^roll",names(training))
+pitch<-grepl("^pitch",names(training))
+yaw<-grepl("^yaw",names(training))
+magnet<-grepl("^magnet",names(training))
+gyro<-grepl("^gyro",names(training))
+acceldata<-training[ ,trainingaccel]
+rolldata<-training[ ,roll]
+pitchdata<-training[ ,pitch]
+yawdata<-training[,yaw]
+magnetdata<-training[,magnet]
+gyrodata<-training[,gyro]
+totaldata<-training[,trainingtotal]
+trainClasse<-cbind(acceldata,rolldata,pitchdata,yawdata,magnetdata,gyrodata,totaldata,training[ ,160])
+colnames(trainClasse)[53]<-'Classe'
+
+testingaccel<-grepl("^accel",names(testing))
+testingtotal<-grepl("^total",names(testing))
+troll<-grepl("^roll",names(testing))
+tpitch<-grepl("^pitch",names(testing))
+tyaw<-grepl("^yaw",names(testing))
+tmagnet<-grepl("^magnet",names(testing))
+tgyro<-grepl("^gyro",names(testing))
+tacceldata<-testing[ ,testingaccel]
+trolldata<-testing[ ,troll]
+tpitchdata<-testing[,tpitch]
+tyawdata<-testing[,tyaw]
+tmagnetdata<-testing[,tmagnet]
+tgyrodata<-testing[,tgyro]
+ttotaldata<-testing[,testingtotal]
+testClasse<-cbind(tacceldata,trolldata,tpitchdata,tyawdata,tmagnetdata,tgyrodata,ttotaldata,testing[ ,160])
+colnames(testClasse)[53]<-'problem.id'
+
+```
+
+## Final basic exploration into the new dataset before we start building models
+
+Let's take a look at how the data is distributed among different classes of our outcomes to make sure that the distribution is not skewed in a way that it makes the accuracy a bad indicator of the performance of the model
+
+and Let's also take a look at the correlation plot
+
+```{r looking at data distrubution and correlations,cache=TRUE, echo=TRUE}
+
+print(table(trainClasse$Classe))
+
+library(corrplot)
+corrplot(cor(trainClasse[,-53]), type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+```
+
+The distribution of the data over the outcome shows that accuracy is a good measure to check which model performs the best
+
+Now once we've done the feature engineering and formatting part, we can move on to modelling and see how different models perform on this dataset
+
+## Model Building and Selection
+#### Dividing the training set into 5 datasets which can be used for 5-fold Cross Validation, then building Models and evaluating which one is the best one for our case
+
+We'll start with a multinomial logistic regressor after which
+we'll try a decision tree followed by a random forest
+
+```{r training different models on the training set to see which one works the best, cache=TRUE, echo=TRUE}
+set.seed(123)
+
+flds <- createFolds(trainClasse$Classe, k = 5, list = TRUE, returnTrain = TRUE)
+
+GLM<-data.frame(training_acc=numeric(),testing_acc=numeric())
+for (k in 1:5) {
+ model<- multinom(Classe~.,data=trainClasse[flds[[k]],])
+ train_acc<-mean(trainClasse[flds[[k]],]$Classe==predict(model,trainClasse[flds[[k]],]))
+ test_acc<-mean(trainClasse[-flds[[k]],]$Classe==predict(model,trainClasse[-flds[[k]],]))
+ GLM[k,]<-cbind(train_acc,test_acc)
+}
+
+models<-data.frame(model=character(),accuracy=numeric())
+
+models<-rbind(models,data.frame(model='GLM',accuracy=as.numeric(mean(GLM$testing_acc))))
+
+TREE<-data.frame(training_acc=numeric(),testing_acc=numeric())
+for (k in 1:5) {
+ model<- rpart(Classe~.,data=trainClasse[flds[[k]],])
+ train_acc<-mean(trainClasse[flds[[k]],]$Classe==predict(model,trainClasse[flds[[k]],],type='class'))
+ test_acc<-mean(trainClasse[-flds[[k]],]$Classe==predict(model,trainClasse[-flds[[k]],],type='class'))
+ TREE[k,]<-cbind(train_acc,test_acc)
+}
+
+models<-rbind(models,data.frame(model='TREE',accuracy=as.numeric(mean(TREE$testing_acc))))
+
+RF<-data.frame(training_acc=numeric(),testing_acc=numeric())
+for (k in 1:5) {
+ model<- randomForest(Classe~.,data=trainClasse[flds[[k]],],importance=T)
+ train_acc<-mean(trainClasse[flds[[k]],]$Classe==predict(model,trainClasse[flds[[k]],],type='class'))
+ test_acc<-mean(trainClasse[-flds[[k]],]$Classe==predict(model,trainClasse[-flds[[k]],],type='class'))
+ RF[k,]<-cbind(train_acc,test_acc)
+}
+
+models<-rbind(models,data.frame(model='Random Forest',accuracy=as.numeric(mean(RF$testing_acc))))
+
+print(models)
+
+
+```
+
+This is how the decision tree looked
+```{r Looking at the decision tree, cache=TRUE, echo=TRUE} 
+library(rpart)
+library(rpart.plot)
+model_TREE<- rpart(Classe~.,data=trainClasse)
+rpart.plot(model_TREE,main = 'The Decision Tree that does not perform well on our data',cex.main=1.5 ,cex=0.7)
+```
+
+This is how different models look when we compare their accuracy after doing a 5-fold cross validation
+```{r Printing the result of K-Forld cross validation for model selection} 
+print(models) 
+```
+
+As we can see, Linear Models and Decision trees perform quite bad on this problem set but the emsemble method, random forest performs really well
+
+It just shows that this dataset/problem statement is a bit too complicated for simple models and needs ensemble methods
+
+Variable importance Plot obtained while building the Random Forest shows that the belt and dumbbell features are the most important ones for classification of type of excercise
+
+```{r Variable importance Plot, cache=TRUE, echo=TRUE} 
+varImpPlot(model, main='Belt and Dumbbell data is the most important data for the model') 
+```
+ 
+
+#### All the models have been validated using K-Fold Cross Validation, with 5 folds, although it wasn't required for Random Forest as it uses keeps 1/3rd of the dataset as OOB to validate the model as it adds the trees to the forest
+
+#### Therefore the accuracy you see in the table, is the accuracy averaged over 5 instances of the model created during the K-Fold Cross Validation
+
+
+
+The best model for this problem is clearly the **Random Forest** so we'll use that on our test set and measure the performance of our model
+
+
+```{r training a random forest on the training set and then testing it on the test set for performance,cache=TRUE, echo=TRUE}
+
+rfModel<-randomForest(Classe~.,data=trainClasse,importance=T)
+
+rfModel
+
+
+
+```
+
+
+####Therefore, we can say that the OOB estimate of error is 0.29%
+
+### This Random Forest model performed quite well on the test set and resulted in a 100% accurate performance, which is the goal for this assignment
+
+##Conclusion
+Random Forest outperforms all the other models tested, probably because it's an ensemble method which can handle the complexity of the dataset without overfitting. It results in an accuracy of 100%.
+
+Gradient Boosting also results is a highly accurate model, which shows the power of ensembling different weak predictors into a strong one. That model is not shown in this markdown file because it was taking too long to run and get embedded in the html
+
+The weaker models like the decision tree and logistic regression perform slightly better for some of the outcomes but quite bad for the others as this problem is too complicated for those models.
+
+For predicting the type of excercise, as we can imagine, the most important variables are the belt and dumbbell features.
+
+This model can be used to predict what is the type of excercise performed and using such data and data models we can also analyse how the people are excercising and what they are doing wrong. Thus we can help people to track their state of health and by helping them excercise better, we can help them improve their health!
